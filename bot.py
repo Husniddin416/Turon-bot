@@ -385,11 +385,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ════════════════════════════════════════
-#          HISOBOT FUNKSIYALARI
+#          HISOBOT FUNKSIYALARI (SHAXSIY)
 # ════════════════════════════════════════
 async def show_balance(update: Update):
+    user_id = update.effective_user.id
     data = load_data()
-    transactions = data.get("transactions", [])
+    # Faqat shu foydalanuvchiga tegishli amallar
+    transactions = [t for t in data.get("transactions", []) if t.get("user_id") == user_id]
 
     total_income = sum(t["amount"] for t in transactions if t["type"] == "income")
     total_expense = sum(t["amount"] for t in transactions if t["type"] == "expense")
@@ -398,18 +400,20 @@ async def show_balance(update: Update):
     balance_icon = "🟢" if balance >= 0 else "🔴"
 
     msg = (
-        "💼 *UMUMIY KASSA HOLATI (BALANS):*\n"
+        "💼 *SHAXSIY KASSA HOLATI (BALANS):*\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         f"➕ Jami Kirim: *{format_money(total_income)}*\n"
         f"➖ Jami Chiqim: *{format_money(total_expense)}*\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"{balance_icon} *Qoldiq (Kassada): {format_money(balance)}*\n"
+        f"{balance_icon} *Qoldiq (Kassangizda): {format_money(balance)}*\n"
     )
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 async def show_statistics(update: Update):
+    user_id = update.effective_user.id
     data = load_data()
-    transactions = data.get("transactions", [])
+    # Faqat shu foydalanuvchiga tegishli amallar
+    transactions = [t for t in data.get("transactions", []) if t.get("user_id") == user_id]
 
     today_str = datetime.now().strftime("%Y-%m-%d")
     month_str = datetime.now().strftime("%Y-%m")
@@ -423,7 +427,7 @@ async def show_statistics(update: Update):
     month_net = month_income - month_expense
 
     msg = (
-        "📊 *MOLIYAVIY STATISTIKA*\n"
+        "📊 *SHAXSIY MOLIYAVIY STATISTIKA*\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📅 *Bugungi kun ({today_str}):*\n"
         f"  ➕ Kirim: {format_money(today_income)}\n"
@@ -438,17 +442,19 @@ async def show_statistics(update: Update):
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 async def show_recent_transactions(update: Update):
+    user_id = update.effective_user.id
     data = load_data()
-    transactions = data.get("transactions", [])
+    # Faqat shu foydalanuvchiga tegishli amallar
+    transactions = [t for t in data.get("transactions", []) if t.get("user_id") == user_id]
 
     if not transactions:
-        await update.message.reply_text("📭 Hozircha hech qanday amallar mavjud emas.", reply_markup=get_main_keyboard())
+        await update.message.reply_text("📭 Hozircha sizda hech qanday amallar mavjud emas.", reply_markup=get_main_keyboard())
         return
 
     recent = transactions[-10:]
     recent.reverse()
 
-    lines = ["📜 *OXIRGI 10 TA AMAL:*\n━━━━━━━━━━━━━━━━━━━━━━"]
+    lines = ["📜 *SIZNING OXIRGI 10 TA AMALINGIZ:*\n━━━━━━━━━━━━━━━━━━━━━━"]
     for t in recent:
         icon = "🟢 Kirim" if t["type"] == "income" else "🔴 Chiqim"
         sign = "+" if t["type"] == "income" else "-"
@@ -477,7 +483,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         pass
 
 def run_render_web_server():
-    port = int(os.environ.get("PORT", 0))
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    print(f"Render Web Service {port}-portda faollashtirildi.")
     if port:
         server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
