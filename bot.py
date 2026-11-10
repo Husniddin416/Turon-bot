@@ -12,6 +12,8 @@ import sys
 import json
 import logging
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 from telegram import (
     Update,
@@ -464,7 +466,26 @@ async def show_recent_transactions(update: Update):
 # ════════════════════════════════════════
 #               ASOSIY QISM
 # ════════════════════════════════════════
+# Render.com Web Service da port tekshiruvi (Health Check) uchun
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot ishlamoqda!")
+
+    def log_message(self, format, *args):
+        pass
+
+def run_render_web_server():
+    port = int(os.environ.get("PORT", 0))
+    if port:
+        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        print(f"Render Web Service {port}-portda faollashtirildi.")
+
 def main():
+    run_render_web_server()
     if not BOT_TOKEN:
         print("XATO: BOT_TOKEN o'rnatilmagan!")
         return
