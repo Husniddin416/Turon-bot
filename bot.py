@@ -482,12 +482,18 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+class ReusableHTTPServer(HTTPServer):
+    allow_reuse_address = True
+
 def run_render_web_server():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    print(f"Render Web Service {port}-portda faollashtirildi.")
+    try:
+        server = ReusableHTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        print(f"Render Web Service {port}-portda faollashtirildi.")
+    except Exception as e:
+        print(f"Web server portida ogohlantirish: {e}")
     if port:
         server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
