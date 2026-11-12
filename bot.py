@@ -13,6 +13,8 @@ import json
 import logging
 import os
 import threading
+import time
+import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 from telegram import (
@@ -472,12 +474,15 @@ async def show_recent_transactions(update: Update):
 # ════════════════════════════════════════
 #               ASOSIY QISM
 # ════════════════════════════════════════
-# Render.com Web Service da port tekshiruvi (Health Check) uchun
+# ════════════════════════════════════════
+#       RENDER 24/7 SERVER VA KEEP-ALIVE
+# ════════════════════════════════════════
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
+        self.send_header("Content-type", "text/plain; charset=utf-8")
         self.end_headers()
-        self.wfile.write(b"Bot ishlamoqda!")
+        self.wfile.write(b"Bot 24/7 faol ishlamoqda!")
 
     def log_message(self, format, *args):
         pass
@@ -485,20 +490,38 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 class ReusableHTTPServer(HTTPServer):
     allow_reuse_address = True
 
+def keep_alive_ping(url: str):
+    """Render 15 daqiqada uxlab qolmasligi uchun har 10 daqiqada ping yuboradi"""
+    time.sleep(30)  # server to'liq ko'tarilishini kutish
+    while True:
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "Render-KeepAlive-Ping/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                log.info(f"Keep-Alive ping yuborildi: {resp.status}")
+        except Exception as e:
+            log.warning(f"Keep-Alive pingda xatolik: {e}")
+        time.sleep(600)  # 10 daqiqa (600 soniya)
+
 def run_render_web_server():
+    """Render uchun bitta toza port ochish va uxlatib qo'ymaslik"""
     port = int(os.environ.get("PORT", 10000))
     try:
         server = ReusableHTTPServer(("0.0.0.0", port), HealthCheckHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        print(f"Render Web Service {port}-portda faollashtirildi.")
+        print(f"✅ Render Web Service {port}-portda muvaffaqiyatli ishga tushdi.")
     except Exception as e:
-        print(f"Web server portida ogohlantirish: {e}")
-    if port:
-        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        print(f"Render Web Service {port}-portda faollashtirildi.")
+        print(f"⚠️ Port ochishda ogohlantirish (e'tiborsiz qoldirish mumkin): {e}")
+
+    # Agar Render URL mavjud bo'lsa, uxlamasligi uchun ping yuborish
+    render_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if render_url:
+        ping_thread = threading.Thread(target=keep_alive_ping, args=(render_url,), daemon=True)
+        ping_thread.start()
+        print(f"🔄 Render Keep-Alive (uxlamaslik) rejimi yoqildi: {render_url}")
 
 def main():
     run_render_web_server()
