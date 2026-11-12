@@ -89,6 +89,18 @@ def format_money(amount: float) -> str:
         return f"{int(amount):,}".replace(",", " ") + " so'm"
     return f"{amount:,.2f}".replace(",", " ") + " so'm"
 
+def make_ratio_bar(income: float, expense: float, length: int = 10):
+    """Kirim va chiqim nisbatiga qarab yashil va qizil chiziqcha yasaydi"""
+    total = income + expense
+    if total <= 0:
+        return "⬜" * length, 0, 0
+    inc_pct = round((income / total) * 100)
+    exp_pct = 100 - inc_pct
+    inc_blocks = round((inc_pct / 100) * length)
+    exp_blocks = length - inc_blocks
+    bar = ("🟩" * inc_blocks) + ("🟥" * exp_blocks)
+    return bar, inc_pct, exp_pct
+
 # ════════════════════════════════════════
 #                KLAVIATURA
 # ════════════════════════════════════════
@@ -392,53 +404,78 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_balance(update: Update):
     user_id = update.effective_user.id
     data = load_data()
-    # Faqat shu foydalanuvchiga tegishli amallar
     transactions = [t for t in data.get("transactions", []) if t.get("user_id") == user_id]
 
     total_income = sum(t["amount"] for t in transactions if t["type"] == "income")
     total_expense = sum(t["amount"] for t in transactions if t["type"] == "expense")
     balance = total_income - total_expense
 
-    balance_icon = "🟢" if balance >= 0 else "🔴"
+    bar, inc_pct, exp_pct = make_ratio_bar(total_income, total_expense, length=10)
+
+    if balance > 0:
+        trend = "📈 *Sof foyda:* `+" + format_money(balance) + "` ⬆️"
+        status_icon = "🟢"
+    elif balance < 0:
+        trend = "📉 *Zarar (Kassada kamomad):* `-" + format_money(abs(balance)) + "` ⬇️"
+        status_icon = "🔴"
+    else:
+        trend = "⚖️ *Qoldiq:* `0 so'm` ➖"
+        status_icon = "⚪"
 
     msg = (
-        "💼 *SHAXSIY KASSA HOLATI (BALANS):*\n"
+        "💼 *SHAXSIY KASSA HOLATI (BALANS)*\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"➕ Jami Kirim: *{format_money(total_income)}*\n"
-        f"➖ Jami Chiqim: *{format_money(total_expense)}*\n"
+        f"🟢 *Kirim:* `+{format_money(total_income)}` ({inc_pct}%) ⬆️\n"
+        f"🔴 *Chiqim:* `-{format_money(total_expense)}` ({exp_pct}%) ⬇️\n\n"
+        f"📊 *Nisbat chizig'i:*\n"
+        f"[{bar}]\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"{balance_icon} *Qoldiq (Kassangizda): {format_money(balance)}*\n"
+        f"{status_icon} *Kassadagi qoldiq:*\n"
+        f"👉 *{format_money(balance)}*\n"
+        f"{trend}\n"
     )
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 async def show_statistics(update: Update):
     user_id = update.effective_user.id
     data = load_data()
-    # Faqat shu foydalanuvchiga tegishli amallar
     transactions = [t for t in data.get("transactions", []) if t.get("user_id") == user_id]
 
     today_str = datetime.now().strftime("%Y-%m-%d")
     month_str = datetime.now().strftime("%Y-%m")
 
+    # Bugungi kun
     today_income = sum(t["amount"] for t in transactions if t["type"] == "income" and t["date"].startswith(today_str))
     today_expense = sum(t["amount"] for t in transactions if t["type"] == "expense" and t["date"].startswith(today_str))
     today_net = today_income - today_expense
+    today_bar, today_inc_p, today_exp_p = make_ratio_bar(today_income, today_expense, length=8)
 
+    today_trend = "📈 ⬆️" if today_net > 0 else ("📉 ⬇️" if today_net < 0 else "⚖️ ➖")
+    today_sign = "+" if today_net >= 0 else "-"
+
+    # Shu oy
     month_income = sum(t["amount"] for t in transactions if t["type"] == "income" and t["date"].startswith(month_str))
     month_expense = sum(t["amount"] for t in transactions if t["type"] == "expense" and t["date"].startswith(month_str))
     month_net = month_income - month_expense
+    month_bar, month_inc_p, month_exp_p = make_ratio_bar(month_income, month_expense, length=8)
+
+    month_trend = "📈 ⬆️" if month_net > 0 else ("📉 ⬇️" if month_net < 0 else "⚖️ ➖")
+    month_sign = "+" if month_net >= 0 else "-"
 
     msg = (
         "📊 *SHAXSIY MOLIYAVIY STATISTIKA*\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📅 *Bugungi kun ({today_str}):*\n"
-        f"  ➕ Kirim: {format_money(today_income)}\n"
-        f"  ➖ Chiqim: {format_money(today_expense)}\n"
-        f"  🔹 Foyda/Farq: {format_money(today_net)}\n\n"
-        f"🗓 *Shu oyda ({month_str}):*\n"
-        f"  ➕ Kirim: {format_money(month_income)}\n"
-        f"  ➖ Chiqim: {format_money(month_expense)}\n"
-        f"  🔹 Foyda/Farq: {format_money(month_net)}\n"
+        f"📅 *Bugungi kun:* `({today_str})`\n"
+        f"  🟢 Kirim:  `+{format_money(today_income)}` ({today_inc_p}%) ⬆️\n"
+        f"  🔴 Chiqim: `-{format_money(today_expense)}` ({today_exp_p}%) ⬇️\n"
+        f"  📊 Chiziq: `[{today_bar}]`\n"
+        f"  🔹 Natija: *{today_sign}{format_money(abs(today_net))}* {today_trend}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🗓 *Shu oyda:* `({month_str})`\n"
+        f"  🟢 Kirim:  `+{format_money(month_income)}` ({month_inc_p}%) ⬆️\n"
+        f"  🔴 Chiqim: `-{format_money(month_expense)}` ({month_exp_p}%) ⬇️\n"
+        f"  📊 Chiziq: `[{month_bar}]`\n"
+        f"  🔹 Natija: *{month_sign}{format_money(abs(month_net))}* {month_trend}\n"
         "━━━━━━━━━━━━━━━━━━━━━━"
     )
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
