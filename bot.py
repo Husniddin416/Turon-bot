@@ -15,8 +15,18 @@ import os
 import threading
 import time
 import urllib.request
+import io
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
+
+# Grafik chizish uchun (headless rejimda)
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except Exception as e:
+    MATPLOTLIB_AVAILABLE = False
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
@@ -100,6 +110,89 @@ def make_ratio_bar(income: float, expense: float, length: int = 10):
     exp_blocks = length - inc_blocks
     bar = ("🟩" * inc_blocks) + ("🟥" * exp_blocks)
     return bar, inc_pct, exp_pct
+
+def generate_trading_chart(transactions: list):
+    """Treyderlar uslubidagi (qora fon, yashil/qizil shamchalar/ustunlar va balans chizig'i) grafik yaratadi"""
+    if not MATPLOTLIB_AVAILABLE:
+        return None
+
+    try:
+        plt.style.use("dark_background")
+        fig, (ax1, ax2) = plt.subplots(
+            2, 1,
+            figsize=(10, 6),
+            gridspec_kw={"height_ratios": [2.5, 1.2]},
+            facecolor="#131722"
+        )
+        ax1.set_facecolor("#131722")
+        ax2.set_facecolor("#131722")
+
+        if not transactions:
+            ax1.text(0.5, 0.5, "Hozircha amallar mavjud emas\n(Kirim yoki Chiqim qo'shing)",
+                     color="#8b949e", fontsize=13, ha="center", va="center")
+            ax1.set_xticks([])
+            ax1.set_yticks([])
+            ax2.set_xticks([])
+            ax2.set_yticks([])
+        else:
+            # Oxirgi 20 ta amal
+            recent_tx = transactions[-20:]
+            running_bal = 0
+            balances = []
+            volumes = []
+            colors = []
+            labels = []
+
+            for t in recent_tx:
+                amt = t["amount"]
+                if t["type"] == "income":
+                    running_bal += amt
+                    volumes.append(amt)
+                    colors.append("#26a69a")  # TradingView yashil
+                else:
+                    running_bal -= amt
+                    volumes.append(-amt)
+                    colors.append("#ef5350")  # TradingView qizil
+                balances.append(running_bal)
+                labels.append(t["date"][5:16])
+
+            x_indices = list(range(len(recent_tx)))
+
+            # 1-Grafik: Balansning o'sishi / kamayishi (Equity curve)
+            line_color = "#2962ff"  # TradingView moviy
+            ax1.plot(x_indices, balances, color=line_color, linewidth=2.5, marker="o", markersize=4, label="Balans")
+            ax1.fill_between(x_indices, balances, alpha=0.2, color=line_color)
+
+            # Nuqtalarga yashil (o'sish ▲) va qizil (kamayish ▼) strelkalar
+            for i, (b, col) in enumerate(zip(balances, colors)):
+                marker = "^" if col == "#26a69a" else "v"
+                ax1.scatter([i], [b], color=col, s=80, zorder=5, marker=marker)
+
+            ax1.set_title("📊 TRADINGVIEW USLUBIDAGI KASSA GRAFIGI", color="#ffffff", fontsize=12, fontweight="bold", pad=12)
+            ax1.grid(True, linestyle="--", alpha=0.2, color="#787b86")
+            ax1.tick_params(colors="#8b949e", labelsize=8)
+            ax1.set_ylabel("Kassa (so'm)", color="#8b949e", fontsize=9)
+            ax1.set_xticks([])
+
+            # 2-Grafik: Hajmlar (Volume bars - Yashil kirim, Qizil chiqim)
+            bar_colors = ["#26a69a" if v >= 0 else "#ef5350" for v in volumes]
+            ax2.bar(x_indices, [abs(v) for v in volumes], color=bar_colors, width=0.55, alpha=0.85)
+            ax2.set_ylabel("Hajm (so'm)", color="#8b949e", fontsize=9)
+            ax2.grid(True, linestyle="--", alpha=0.2, color="#787b86")
+            ax2.tick_params(colors="#8b949e", labelsize=8)
+
+            ax2.set_xticks(x_indices)
+            ax2.set_xticklabels(labels, rotation=30, ha="right", color="#8b949e", fontsize=7)
+
+        plt.tight_layout()
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=140, facecolor=fig.get_facecolor(), edgecolor="none")
+        buf.seek(0)
+        plt.close(fig)
+        return buf
+    except Exception as e:
+        log.error(f"Grafik chizishda xatolik: {e}")
+        return None
 
 # ════════════════════════════════════════
 #                KLAVIATURA
@@ -478,7 +571,17 @@ async def show_statistics(update: Update):
         f"  🔹 Natija: *{month_sign}{format_money(abs(month_net))}* {month_trend}\n"
         "━━━━━━━━━━━━━━━━━━━━━━"
     )
-    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
+
+    chart_buf = generate_trading_chart(transactions)
+    if chart_buf:
+        await update.message.reply_photo(
+            photo=chart_buf,
+            caption=msg,
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard()
+        )
+    else:
+        await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 async def show_recent_transactions(update: Update):
     user_id = update.effective_user.id
