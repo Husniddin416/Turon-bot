@@ -19,6 +19,20 @@ import io
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardRemove,
+)
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
+
 # Grafik chizish uchun (headless rejimda)
 try:
     import matplotlib
