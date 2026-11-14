@@ -46,7 +46,8 @@ from telegram.ext import (
 # ════════════════════════════════════════
 BOT_TOKEN = "9165416573:AAE73iZ7wdNe1-bkWi5b4se-x2Eae8uuW3E"
 DATA_FILE = "finance_data.json"
-DEFAULT_PASSWORD = "muhammad0206"
+DEFAULT_LOGIN = "Muhammad"
+DEFAULT_PASSWORD = "muhammad2002"
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -60,6 +61,7 @@ log = logging.getLogger(__name__)
 def load_data() -> dict:
     if not os.path.exists(DATA_FILE):
         initial_data = {
+            "login": DEFAULT_LOGIN,
             "password": DEFAULT_PASSWORD,
             "authorized_users": [],
             "transactions": []
@@ -70,6 +72,8 @@ def load_data() -> dict:
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
+            if "login" not in data or not data["login"]:
+                data["login"] = DEFAULT_LOGIN
             if "password" not in data or not data["password"]:
                 data["password"] = DEFAULT_PASSWORD
             if "authorized_users" not in data:
@@ -80,6 +84,7 @@ def load_data() -> dict:
     except Exception as e:
         log.error(f"Faylni o'qishda xatolik: {e}")
         return {
+            "login": DEFAULT_LOGIN,
             "password": DEFAULT_PASSWORD,
             "authorized_users": [],
             "transactions": []
@@ -226,9 +231,11 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_main_keyboard()
         )
     else:
+        context.user_data["auth_step"] = "WAITING_LOGIN"
         await update.message.reply_text(
             "🔒 *Assalomu alaykum!*\n\n"
-            "Ushbu botdan foydalanish uchun parolni kiriting:",
+            "Admin paneliga kirish uchun:\n"
+            "1️⃣ *Login*ingizni kiriting:",
             parse_mode="Markdown",
             reply_markup=ReplyKeyboardRemove()
         )
@@ -242,31 +249,53 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
     data = load_data()
 
-    # 1. AGAR FOYDALANUVCHI HALI PAROL BILAN KIRMAGAN BO'LSA
+    # 1. AGAR FOYDALANUVCHI HALI ADMIN PANELGA KIRMAGAN BO'LSA (2 BOSQICHLI: LOGIN + PAROL)
     if not is_authorized(user_id):
+        auth_step = context.user_data.get("auth_step", "WAITING_LOGIN")
+        current_login = data.get("login", DEFAULT_LOGIN).strip()
         current_password = data.get("password", DEFAULT_PASSWORD).strip()
 
-        # Parolni tekshiramiz (katta-kichik harflar va bo'shliqlarga e'tibor qaratib)
-        if user_text == current_password or user_text.lower() == current_password.lower():
-            if user_id not in data["authorized_users"]:
-                data["authorized_users"].append(user_id)
-                save_data(data)
-            
-            context.user_data.clear()
-            await update.message.reply_text(
-                "✅ *Parol to'g'ri! Botga xush kelibsiz.*\n\n"
-                "Quyidagi menyu orqali kerakli bo'limni tanlang:",
-                parse_mode="Markdown",
-                reply_markup=get_main_keyboard()
-            )
+        # B) Parol kiritish bosqichi
+        if auth_step == "WAITING_PASSWORD":
+            if user_text == current_password or user_text.lower() == current_password.lower():
+                if user_id not in data["authorized_users"]:
+                    data["authorized_users"].append(user_id)
+                    save_data(data)
+
+                context.user_data.clear()
+                await update.message.reply_text(
+                    "✅ *Parol to'g'ri! Admin paneliga xush kelibsiz.*\n\n"
+                    "Quyidagi menyu orqali boshqarishingiz mumkin:",
+                    parse_mode="Markdown",
+                    reply_markup=get_main_keyboard()
+                )
+            else:
+                await update.message.reply_text(
+                    "❌ *Noto'g'ri parol!*\n\n"
+                    "2️⃣ Iltimos, parolni qaytadan kiriting:",
+                    parse_mode="Markdown"
+                )
+            return
+
+        # A) Login kiritish bosqichi
         else:
-            await update.message.reply_text(
-                "❌ *Noto'g'ri parol!*\n\n"
-                "Iltimos, parolni qaytadan to'g'ri kiriting:",
-                parse_mode="Markdown",
-                reply_markup=ReplyKeyboardRemove()
-            )
-        return
+            if user_text.lower() == current_login.lower():
+                context.user_data["auth_step"] = "WAITING_PASSWORD"
+                await update.message.reply_text(
+                    "✅ *Login to'g'ri!*\n\n"
+                    "2️⃣ Endi *parol*ni kiriting:",
+                    parse_mode="Markdown",
+                    reply_markup=ReplyKeyboardRemove()
+                )
+            else:
+                context.user_data["auth_step"] = "WAITING_LOGIN"
+                await update.message.reply_text(
+                    "❌ *Noto'g'ri login!*\n\n"
+                    "1️⃣ Iltimos, admin loginini to'g'ri kiriting:",
+                    parse_mode="Markdown",
+                    reply_markup=ReplyKeyboardRemove()
+                )
+            return
 
     # 2. AGAR BEKOR QILISH BOSILSA
     if user_text == "❌ Bekor qilish":
@@ -679,7 +708,8 @@ def main():
 
     print("=" * 50)
     print("🤖 Kirdi-Chiqdi (Moliya) boti ishga tushirildi!")
-    print(f"🔑 Boshlang'ich parol: {DEFAULT_PASSWORD}")
+    print(f"👤 Admin Login: {DEFAULT_LOGIN}")
+    print(f"🔑 Admin Parol: {DEFAULT_PASSWORD}")
     print("=" * 50)
 
     app.run_polling()
