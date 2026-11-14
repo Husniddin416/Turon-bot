@@ -1,6 +1,8 @@
 {
-  "login": "Muhammad",
-  "password": "muhammad2002",
+  "bot_password": "12345",
+  "admin_login": "Muhammad",
+  "admin_password": "muhammad2002",
   "authorized_users": [],
+  "admin_sessions": [],
   "transactions": []
 }

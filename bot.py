@@ -27,27 +27,16 @@ try:
     MATPLOTLIB_AVAILABLE = True
 except Exception as e:
     MATPLOTLIB_AVAILABLE = False
-from telegram import (
-    Update,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    ReplyKeyboardRemove,
-)
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
 
 # ════════════════════════════════════════
 #             SOZLAMALAR
 # ════════════════════════════════════════
 BOT_TOKEN = "9165416573:AAE73iZ7wdNe1-bkWi5b4se-x2Eae8uuW3E"
 DATA_FILE = "finance_data.json"
-DEFAULT_LOGIN = "Muhammad"
-DEFAULT_PASSWORD = "muhammad2002"
+
+DEFAULT_BOT_PASSWORD = "12345"
+DEFAULT_ADMIN_LOGIN = "Muhammad"
+DEFAULT_ADMIN_PASSWORD = "muhammad2002"
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -61,8 +50,9 @@ log = logging.getLogger(__name__)
 def load_data() -> dict:
     if not os.path.exists(DATA_FILE):
         initial_data = {
-            "login": DEFAULT_LOGIN,
-            "password": DEFAULT_PASSWORD,
+            "bot_password": DEFAULT_BOT_PASSWORD,
+            "admin_login": DEFAULT_ADMIN_LOGIN,
+            "admin_password": DEFAULT_ADMIN_PASSWORD,
             "authorized_users": [],
             "transactions": []
         }
@@ -72,10 +62,12 @@ def load_data() -> dict:
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            if "login" not in data or not data["login"]:
-                data["login"] = DEFAULT_LOGIN
-            if "password" not in data or not data["password"]:
-                data["password"] = DEFAULT_PASSWORD
+            if "bot_password" not in data or not data["bot_password"]:
+                data["bot_password"] = data.get("password", DEFAULT_BOT_PASSWORD)
+            if "admin_login" not in data or not data["admin_login"]:
+                data["admin_login"] = DEFAULT_ADMIN_LOGIN
+            if "admin_password" not in data or not data["admin_password"]:
+                data["admin_password"] = DEFAULT_ADMIN_PASSWORD
             if "authorized_users" not in data:
                 data["authorized_users"] = []
             if "transactions" not in data:
@@ -84,8 +76,9 @@ def load_data() -> dict:
     except Exception as e:
         log.error(f"Faylni o'qishda xatolik: {e}")
         return {
-            "login": DEFAULT_LOGIN,
-            "password": DEFAULT_PASSWORD,
+            "bot_password": DEFAULT_BOT_PASSWORD,
+            "admin_login": DEFAULT_ADMIN_LOGIN,
+            "admin_password": DEFAULT_ADMIN_PASSWORD,
             "authorized_users": [],
             "transactions": []
         }
@@ -140,7 +133,6 @@ def generate_trading_chart(transactions: list):
             ax2.set_xticks([])
             ax2.set_yticks([])
         else:
-            # Oxirgi 20 ta amal
             recent_tx = transactions[-20:]
             running_bal = 0
             balances = []
@@ -164,11 +156,10 @@ def generate_trading_chart(transactions: list):
             x_indices = list(range(len(recent_tx)))
 
             # 1-Grafik: Balansning o'sishi / kamayishi (Equity curve)
-            line_color = "#2962ff"  # TradingView moviy
+            line_color = "#2962ff"
             ax1.plot(x_indices, balances, color=line_color, linewidth=2.5, marker="o", markersize=4, label="Balans")
             ax1.fill_between(x_indices, balances, alpha=0.2, color=line_color)
 
-            # Nuqtalarga yashil (o'sish ▲) va qizil (kamayish ▼) strelkalar
             for i, (b, col) in enumerate(zip(balances, colors)):
                 marker = "^" if col == "#26a69a" else "v"
                 ax1.scatter([i], [b], color=col, s=80, zorder=5, marker=marker)
@@ -206,8 +197,16 @@ def get_main_keyboard():
     keyboard = [
         [KeyboardButton("➕ Kirim qo'shish"), KeyboardButton("➖ Chiqim qo'shish")],
         [KeyboardButton("💰 Kassa holati (Balans)"), KeyboardButton("📊 Statistika")],
-        [KeyboardButton("📜 Oxirgi amallar"), KeyboardButton("⚙️ Parolni o'zgartirish")],
+        [KeyboardButton("📜 Oxirgi amallar"), KeyboardButton("👑 Admin panel")],
         [KeyboardButton("🔒 Chiqish (Qulflash)")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+def get_admin_keyboard():
+    keyboard = [
+        [KeyboardButton("🔑 Bot parolini o'zgartirish")],
+        [KeyboardButton("📊 Umumiy kassa hisoboti"), KeyboardButton("👥 Foydalanuvchilar")],
+        [KeyboardButton("⬅️ Asosiy menyuga qaytish")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -231,11 +230,9 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_main_keyboard()
         )
     else:
-        context.user_data["auth_step"] = "WAITING_LOGIN"
         await update.message.reply_text(
             "🔒 *Assalomu alaykum!*\n\n"
-            "Admin paneliga kirish uchun:\n"
-            "1️⃣ *Login*ingizni kiriting:",
+            "Botdan foydalanish uchun parolni kiriting:",
             parse_mode="Markdown",
             reply_markup=ReplyKeyboardRemove()
         )
@@ -249,61 +246,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
     data = load_data()
 
-    # 1. AGAR FOYDALANUVCHI HALI ADMIN PANELGA KIRMAGAN BO'LSA (2 BOSQICHLI: LOGIN + PAROL)
+    # 1. AGAR FOYDALANUVCHI HALI BOTGA KIRMAGAN BO'LSA (Botga kirish paroli: 12345)
     if not is_authorized(user_id):
-        auth_step = context.user_data.get("auth_step", "WAITING_LOGIN")
-        current_login = data.get("login", DEFAULT_LOGIN).strip()
-        current_password = data.get("password", DEFAULT_PASSWORD).strip()
+        current_bot_password = data.get("bot_password", DEFAULT_BOT_PASSWORD).strip()
 
-        # B) Parol kiritish bosqichi
-        if auth_step == "WAITING_PASSWORD":
-            if user_text == current_password or user_text.lower() == current_password.lower():
-                if user_id not in data["authorized_users"]:
-                    data["authorized_users"].append(user_id)
-                    save_data(data)
+        if user_text == current_bot_password or user_text.lower() == current_bot_password.lower():
+            if user_id not in data["authorized_users"]:
+                data["authorized_users"].append(user_id)
+                save_data(data)
 
-                context.user_data.clear()
-                await update.message.reply_text(
-                    "✅ *Parol to'g'ri! Admin paneliga xush kelibsiz.*\n\n"
-                    "Quyidagi menyu orqali boshqarishingiz mumkin:",
-                    parse_mode="Markdown",
-                    reply_markup=get_main_keyboard()
-                )
-            else:
-                await update.message.reply_text(
-                    "❌ *Noto'g'ri parol!*\n\n"
-                    "2️⃣ Iltimos, parolni qaytadan kiriting:",
-                    parse_mode="Markdown"
-                )
-            return
-
-        # A) Login kiritish bosqichi
+            context.user_data.clear()
+            await update.message.reply_text(
+                "✅ *Parol to'g'ri! Botga xush kelibsiz.*\n\n"
+                "Quyidagi menyu orqali ishlashingiz mumkin:",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard()
+            )
         else:
-            if user_text.lower() == current_login.lower():
-                context.user_data["auth_step"] = "WAITING_PASSWORD"
-                await update.message.reply_text(
-                    "✅ *Login to'g'ri!*\n\n"
-                    "2️⃣ Endi *parol*ni kiriting:",
-                    parse_mode="Markdown",
-                    reply_markup=ReplyKeyboardRemove()
-                )
-            else:
-                context.user_data["auth_step"] = "WAITING_LOGIN"
-                await update.message.reply_text(
-                    "❌ *Noto'g'ri login!*\n\n"
-                    "1️⃣ Iltimos, admin loginini to'g'ri kiriting:",
-                    parse_mode="Markdown",
-                    reply_markup=ReplyKeyboardRemove()
-                )
-            return
+            await update.message.reply_text(
+                "❌ *Noto'g'ri parol!*\n\n"
+                "Iltimos, botga kirish parolini to'g'ri kiriting:",
+                parse_mode="Markdown",
+                reply_markup=ReplyKeyboardRemove()
+            )
+        return
 
     # 2. AGAR BEKOR QILISH BOSILSA
     if user_text == "❌ Bekor qilish":
+        is_in_admin = context.user_data.get("is_admin", False)
         context.user_data.clear()
-        await update.message.reply_text(
-            "Amal bekor qilindi.",
-            reply_markup=get_main_keyboard()
-        )
+        if is_in_admin:
+            context.user_data["is_admin"] = True
+            await update.message.reply_text("Amal bekor qilindi.", reply_markup=get_admin_keyboard())
+        else:
+            await update.message.reply_text("Amal bekor qilindi.", reply_markup=get_main_keyboard())
         return
 
     # 3. ASOSIY MENYU BUYRUQLARI
@@ -341,15 +317,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_recent_transactions(update)
         return
 
-    elif user_text == "⚙️ Parolni o'zgartirish":
-        context.user_data["step"] = "NEW_PASSWORD"
+    # 4. ADMIN PANELGA KIRISH TUGMASI (1-Muhammad, 2-muhammad2002)
+    elif user_text == "👑 Admin panel":
+        if context.user_data.get("is_admin", False):
+            await update.message.reply_text("👑 Admin boshqaruv paneli:", reply_markup=get_admin_keyboard())
+            return
+
+        context.user_data["step"] = "ADMIN_AUTH_LOGIN"
         await update.message.reply_text(
-            "⚙️ *Yangi parolni kiriting:*\n"
-            "(Kamida 4 ta belgidan iborat bo'lsin)\n\n"
+            "👑 *Admin paneliga kirish*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "1️⃣ *1-parolni (Login)* kiriting:\n\n"
             "Bekor qilish uchun: '❌ Bekor qilish'",
             parse_mode="Markdown",
             reply_markup=get_cancel_keyboard()
         )
+        return
+
+    elif user_text == "⬅️ Asosiy menyuga qaytish":
+        context.user_data["step"] = None
+        await update.message.reply_text("Asosiy menyuga qaytdingiz.", reply_markup=get_main_keyboard())
         return
 
     elif user_text == "🔒 Chiqish (Qulflash)":
@@ -363,11 +350,111 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 4. BOSQICHMA-BOSQICH JARAYONLAR (STEPS)
+    # 5. ADMIN MENYUSIDAGI BUYRUQLAR (Faqat adminga kirgandan so'ng)
+    if user_text == "🔑 Bot parolini o'zgartirish":
+        if not context.user_data.get("is_admin", False):
+            await update.message.reply_text("⚠️ Faqat admin parolni o'zgartira oladi!", reply_markup=get_main_keyboard())
+            return
+
+        context.user_data["step"] = "SET_NEW_BOT_PASSWORD"
+        current_p = data.get("bot_password", DEFAULT_BOT_PASSWORD)
+        await update.message.reply_text(
+            f"🔑 *Botga kirish parolini o'zgartirish*\n"
+            f"Joriy parol: `{current_p}`\n\n"
+            f"Endi botga kirish uchun *yangi parolni* kiriting:\n"
+            f"Bekor qilish uchun: '❌ Bekor qilish'",
+            parse_mode="Markdown",
+            reply_markup=get_cancel_keyboard()
+        )
+        return
+
+    elif user_text == "📊 Umumiy kassa hisoboti":
+        if not context.user_data.get("is_admin", False):
+            await update.message.reply_text("⚠️ Ruxsat yo'q!", reply_markup=get_main_keyboard())
+            return
+        await show_global_balance(update)
+        return
+
+    elif user_text == "👥 Foydalanuvchilar":
+        if not context.user_data.get("is_admin", False):
+            await update.message.reply_text("⚠️ Ruxsat yo'q!", reply_markup=get_main_keyboard())
+            return
+        users_count = len(data.get("authorized_users", []))
+        tx_count = len(data.get("transactions", []))
+        await update.message.reply_text(
+            f"👥 *Bot foydalanuvchilari statistikasi:*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔹 Tizimga kirgan foydalanuvchilar: *{users_count} ta*\n"
+            f"🔹 Jami bajarilgan amallar: *{tx_count} ta*\n",
+            parse_mode="Markdown",
+            reply_markup=get_admin_keyboard()
+        )
+        return
+
+    # 6. BOSQICHMA-BOSQICH JARAYONLAR (STEPS)
     current_step = context.user_data.get("step")
 
-    # A) Kirim summasini qabul qilish
-    if current_step == "INCOME_AMOUNT":
+    # A) Admin 1-parol (Login: Muhammad)
+    if current_step == "ADMIN_AUTH_LOGIN":
+        admin_login = data.get("admin_login", DEFAULT_ADMIN_LOGIN).strip()
+        if user_text.lower() == admin_login.lower():
+            context.user_data["step"] = "ADMIN_AUTH_PASS"
+            await update.message.reply_text(
+                "✅ 1-parol (Login) to'g'ri!\n\n"
+                "2️⃣ Endi *2-parolni* kiriting:\n\n"
+                "Bekor qilish uchun: '❌ Bekor qilish'",
+                parse_mode="Markdown",
+                reply_markup=get_cancel_keyboard()
+            )
+        else:
+            await update.message.reply_text(
+                "❌ *1-parol (Login) noto'g'ri!*\n"
+                "Iltimos, qaytadan to'g'ri kiriting:\n(Bekor qilish: '❌ Bekor qilish')",
+                parse_mode="Markdown"
+            )
+        return
+
+    # B) Admin 2-parol (muhammad2002)
+    elif current_step == "ADMIN_AUTH_PASS":
+        admin_pass = data.get("admin_password", DEFAULT_ADMIN_PASSWORD).strip()
+        if user_text == admin_pass or user_text.lower() == admin_pass.lower():
+            context.user_data["is_admin"] = True
+            context.user_data["step"] = None
+            await update.message.reply_text(
+                "👑 *Admin paneliga xush kelibsiz, Muhammad!*\n\n"
+                "Bu yerdan botga kirish parolini o'zgartirishingiz va umumiy hisobotlarni ko'rishingiz mumkin:",
+                parse_mode="Markdown",
+                reply_markup=get_admin_keyboard()
+            )
+        else:
+            await update.message.reply_text(
+                "❌ *2-parol noto'g'ri!*\n"
+                "Iltimos, parolni qaytadan kiriting:\n(Bekor qilish: '❌ Bekor qilish')",
+                parse_mode="Markdown"
+            )
+        return
+
+    # C) Bot parolini o'zgartirish (faqat admin tomonidan)
+    elif current_step == "SET_NEW_BOT_PASSWORD":
+        if len(user_text) < 3:
+            await update.message.reply_text("⚠️ Parol kamida 3 ta belgidan iborat bo'lsin:")
+            return
+
+        data["bot_password"] = user_text
+        save_data(data)
+        context.user_data["step"] = None
+
+        await update.message.reply_text(
+            f"✅ *Botga kirish paroli muvaffaqiyatli o'zgartirildi!*\n\n"
+            f"Endi yangi foydalanuvchilar `/start` bosganda ushbu yangi parolni kiritishadi:\n"
+            f"👉 `{user_text}`",
+            parse_mode="Markdown",
+            reply_markup=get_admin_keyboard()
+        )
+        return
+
+    # D) Kirim summasini qabul qilish
+    elif current_step == "INCOME_AMOUNT":
         clean_sum = user_text.replace(" ", "").replace(",", "").replace("so'm", "").replace("som", "")
         try:
             amount = float(clean_sum)
@@ -391,7 +478,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # B) Kirim izohini qabul qilish va saqlash
+    # E) Kirim izohini qabul qilish va saqlash
     elif current_step == "INCOME_COMMENT":
         comment = user_text if user_text != "-" else "Kirim"
         amount = context.user_data.get("temp_amount", 0)
@@ -420,7 +507,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # C) Chiqim summasini qabul qilish
+    # F) Chiqim summasini qabul qilish
     elif current_step == "EXPENSE_AMOUNT":
         clean_sum = user_text.replace(" ", "").replace(",", "").replace("so'm", "").replace("som", "")
         try:
@@ -445,7 +532,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # D) Chiqim izohini qabul qilish va saqlash
+    # G) Chiqim izohini qabul qilish va saqlash
     elif current_step == "EXPENSE_COMMENT":
         comment = user_text if user_text != "-" else "Xarajat"
         amount = context.user_data.get("temp_amount", 0)
@@ -474,54 +561,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # E) Yangi parolni qabul qilish
-    elif current_step == "NEW_PASSWORD":
-        if len(user_text) < 4:
-            await update.message.reply_text("⚠️ Parol juda qisqa! Kamida 4 ta belgi kiriting:")
-            return
-
-        context.user_data["temp_new_pass"] = user_text
-        context.user_data["step"] = "CONFIRM_NEW_PASSWORD"
-        await update.message.reply_text(
-            "🔑 Yangi parolni tasdiqlash uchun uni *qaytadan kiriting*:\n\n"
-            "Bekor qilish uchun: '❌ Bekor qilish'",
-            parse_mode="Markdown",
-            reply_markup=get_cancel_keyboard()
-        )
-        return
-
-    # F) Yangi parolni tasdiqlash
-    elif current_step == "CONFIRM_NEW_PASSWORD":
-        candidate = context.user_data.get("temp_new_pass", "")
-        if user_text != candidate:
-            context.user_data.clear()
-            await update.message.reply_text(
-                "❌ Parollar bir-biriga mos kelmadi!\nParol o'zgartirish bekor qilindi.",
-                reply_markup=get_main_keyboard()
-            )
-            return
-
-        data["password"] = candidate
-        save_data(data)
-        context.user_data.clear()
-
-        await update.message.reply_text(
-            f"✅ *Parol muvaffaqiyatli o'zgartirildi!*\n\n"
-            f"Yangi parolingiz: `{candidate}`\n"
-            f"Uni eslab qoling!",
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard()
-        )
-        return
-
-    # Agar hech qanday shartga tushmasa, menyuni ko'rsatamiz
+    # Agar hech qanday shartga tushmasa
     await update.message.reply_text(
-        "Iltimos, menyudagi tugmalardan birini tanlang:",
+        "Iltimos, quyidagi menyu tugmalaridan birini tanlang:",
         reply_markup=get_main_keyboard()
     )
 
 # ════════════════════════════════════════
-#          HISOBOT FUNKSIYALARI (SHAXSIY)
+#          HISOBOT FUNKSIYALARI
 # ════════════════════════════════════════
 async def show_balance(update: Update):
     user_id = update.effective_user.id
@@ -615,7 +662,6 @@ async def show_statistics(update: Update):
 async def show_recent_transactions(update: Update):
     user_id = update.effective_user.id
     data = load_data()
-    # Faqat shu foydalanuvchiga tegishli amallar
     transactions = [t for t in data.get("transactions", []) if t.get("user_id") == user_id]
 
     if not transactions:
@@ -640,9 +686,25 @@ async def show_recent_transactions(update: Update):
     msg = "\n".join(lines)
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
-# ════════════════════════════════════════
-#               ASOSIY QISM
-# ════════════════════════════════════════
+async def show_global_balance(update: Update):
+    """Admin uchun barcha foydalanuvchilarning umumiy kassasi"""
+    data = load_data()
+    transactions = data.get("transactions", [])
+
+    total_income = sum(t["amount"] for t in transactions if t["type"] == "income")
+    total_expense = sum(t["amount"] for t in transactions if t["type"] == "expense")
+    balance = total_income - total_expense
+
+    msg = (
+        "👑 *BUTUN BOT BO'YICHA UMUMIY KASSA:*\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"➕ Barcha Kirimlar: *{format_money(total_income)}*\n"
+        f"➖ Barcha Chiqimlar: *{format_money(total_expense)}*\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💳 *Jami qoldiq: {format_money(balance)}*\n"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_admin_keyboard())
+
 # ════════════════════════════════════════
 #       RENDER 24/7 SERVER VA KEEP-ALIVE
 # ════════════════════════════════════════
@@ -660,8 +722,7 @@ class ReusableHTTPServer(HTTPServer):
     allow_reuse_address = True
 
 def keep_alive_ping(url: str):
-    """Render 15 daqiqada uxlab qolmasligi uchun har 10 daqiqada ping yuboradi"""
-    time.sleep(30)  # server to'liq ko'tarilishini kutish
+    time.sleep(30)
     while True:
         try:
             req = urllib.request.Request(
@@ -672,10 +733,9 @@ def keep_alive_ping(url: str):
                 log.info(f"Keep-Alive ping yuborildi: {resp.status}")
         except Exception as e:
             log.warning(f"Keep-Alive pingda xatolik: {e}")
-        time.sleep(600)  # 10 daqiqa (600 soniya)
+        time.sleep(600)
 
 def run_render_web_server():
-    """Render uchun bitta toza port ochish va uxlatib qo'ymaslik"""
     port = int(os.environ.get("PORT", 10000))
     try:
         server = ReusableHTTPServer(("0.0.0.0", port), HealthCheckHandler)
@@ -685,13 +745,15 @@ def run_render_web_server():
     except Exception as e:
         print(f"⚠️ Port ochishda ogohlantirish (e'tiborsiz qoldirish mumkin): {e}")
 
-    # Agar Render URL mavjud bo'lsa, uxlamasligi uchun ping yuborish
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
     if render_url:
         ping_thread = threading.Thread(target=keep_alive_ping, args=(render_url,), daemon=True)
         ping_thread.start()
         print(f"🔄 Render Keep-Alive (uxlamaslik) rejimi yoqildi: {render_url}")
 
+# ════════════════════════════════════════
+#               ASOSIY QISM
+# ════════════════════════════════════════
 def main():
     run_render_web_server()
     if not BOT_TOKEN:
@@ -702,14 +764,14 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Buyruqlar va xabarlar
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("=" * 50)
     print("🤖 Kirdi-Chiqdi (Moliya) boti ishga tushirildi!")
-    print(f"👤 Admin Login: {DEFAULT_LOGIN}")
-    print(f"🔑 Admin Parol: {DEFAULT_PASSWORD}")
+    print(f"🔑 Botga kirish paroli: {DEFAULT_BOT_PASSWORD}")
+    print(f"👤 Admin Login: {DEFAULT_ADMIN_LOGIN}")
+    print(f"🔐 Admin Parol: {DEFAULT_ADMIN_PASSWORD}")
     print("=" * 50)
 
     app.run_polling()
