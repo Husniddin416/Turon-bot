@@ -197,14 +197,13 @@ def get_main_keyboard():
     keyboard = [
         [KeyboardButton("➕ Kirim qo'shish"), KeyboardButton("➖ Chiqim qo'shish")],
         [KeyboardButton("💰 Kassa holati (Balans)"), KeyboardButton("📊 Statistika")],
-        [KeyboardButton("📜 Oxirgi amallar"), KeyboardButton("👑 Admin panel")],
-        [KeyboardButton("🔒 Chiqish (Qulflash)")]
+        [KeyboardButton("📜 Oxirgi amallar"), KeyboardButton("👑 Admin panel"), KeyboardButton("🔒 Chiqish")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 def get_admin_keyboard():
     keyboard = [
-        [KeyboardButton("🔑 Bot parolini o'zgartirish")],
+        [KeyboardButton("🔑 Botga kirish parolini o'zgartirish")],
         [KeyboardButton("📊 Umumiy kassa hisoboti"), KeyboardButton("👥 Foydalanuvchilar")],
         [KeyboardButton("⬅️ Asosiy menyuga qaytish")]
     ]
@@ -339,7 +338,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Asosiy menyuga qaytdingiz.", reply_markup=get_main_keyboard())
         return
 
-    elif user_text == "🔒 Chiqish (Qulflash)":
+    elif user_text in ["🔒 Chiqish", "🔒 Chiqish (Qulflash)"]:
         if user_id in data["authorized_users"]:
             data["authorized_users"].remove(user_id)
             save_data(data)
@@ -351,7 +350,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # 5. ADMIN MENYUSIDAGI BUYRUQLAR (Faqat adminga kirgandan so'ng)
-    if user_text == "🔑 Bot parolini o'zgartirish":
+    if user_text in ["🔑 Botga kirish parolini o'zgartirish", "🔑 Bot parolini o'zgartirish"]:
         if not context.user_data.get("is_admin", False):
             await update.message.reply_text("⚠️ Faqat admin parolni o'zgartira oladi!", reply_markup=get_main_keyboard())
             return
@@ -362,6 +361,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🔑 *Botga kirish parolini o'zgartirish*\n"
             f"Joriy parol: `{current_p}`\n\n"
             f"Endi botga kirish uchun *yangi parolni* kiriting:\n"
+            f"(Bu parol botga kirishdagi `{current_p}` o'rniga o'rnatiladi)\n\n"
             f"Bekor qilish uchun: '❌ Bekor qilish'",
             parse_mode="Markdown",
             reply_markup=get_cancel_keyboard()
